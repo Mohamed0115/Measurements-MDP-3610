@@ -1,128 +1,114 @@
 #include <LiquidCrystal.h>
 
-// Initialize LCD pins
+// Initialize LCD with pins: RS, EN, D4, D5, D6, D7
 LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
 
-// Define HX711 pins
-#define DT_PIN 9
-#define SCK_PIN 8
+// Define HX711 load cell amplifier pins
+#define DT_PIN 9     // Data pin for HX711
+#define SCK_PIN 8    // Clock pin for HX711
 
-// Constants and variables
-#define calibration_factor 100000.0 // Adjust this based on your load cell
-unsigned long previousMillis = 0;
-const long interval = 100; // Time interval for refreshing the display (in ms)
-float force = 0;
-long tareValue = 0;  // To store the raw value when no weight is on the scale
+// Calibration constant to convert raw reading to force (adjust as needed)
+#define calibration_factor -7050.0 
 
-// Function declarations
-void initializeLCD();
-void initializeScale();
-void displayGroupName();
-void measureAndDisplayForce();
-long readHX711();
-float getForce();
-void tareScale();
-void displayForce(float force);
-void printToSerial(float force);
+// Variables for timing
+unsigned long previousMillis = 0; // Tracks the last time the force was measured
+const long interval = 1;          // Interval in milliseconds for measuring force
+float force = 0;                  // Variable to store the force reading
+
+// Function declarations for modular code organization
+void initializeLCD();             // Initialize the LCD display
+void initializeScale();           // Initialize the HX711 pins for scale
+void displayGroupName();          // Display the group name on the LCD
+void measureAndDisplayForce();    // Read, display, and print force value
+long readHX711();                 // Read raw data from HX711
+float getForce();                 // Calculate force using raw HX711 data and calibration
+void displayForce(float force);   // Show force value on the LCD
+void printToSerial(float force);  // Print force value to Serial Monitor
 
 void setup() {
-  Serial.begin(9600);
-  initializeLCD();
-  initializeScale();
-  displayGroupName();
-  tareScale();  // Tare the scale to remove the offset from any initial readings
+  Serial.begin(9600);             // Start serial communication
+  initializeLCD();                // Set up the LCD display
+  initializeScale();              // Set up the HX711 pins
+  displayGroupName();             // Show initial text on LCD (e.g., group name)
 }
 
 void loop() {
-  unsigned long currentMillis = millis();
-  
+  unsigned long currentMillis = millis(); // Current time
+
+  // Check if it's time to measure force
   if (currentMillis - previousMillis >= interval) {
-    previousMillis = currentMillis;
-    
-    measureAndDisplayForce();
+    previousMillis = currentMillis; // Update the last time of measurement
+    measureAndDisplayForce();       // Measure force and update display
   }
 }
 
-// Function to initialize LCD
+// Initialize LCD display with 16 columns and 2 rows
 void initializeLCD() {
-  lcd.begin(16, 2);
+  lcd.begin(16, 2);                // Set LCD dimensions
 }
 
-// Function to initialize HX711 scale pins
+// Set HX711 pins: SCK_PIN as OUTPUT and DT_PIN as INPUT
 void initializeScale() {
-  pinMode(SCK_PIN, OUTPUT);
-  pinMode(DT_PIN, INPUT);
+  pinMode(SCK_PIN, OUTPUT);        // Clock pin as output
+  pinMode(DT_PIN, INPUT);          // Data pin as input
 }
 
-// Function to display group name on LCD
+// Display static text (e.g., group name) on the first row of LCD
 void displayGroupName() {
-  lcd.setCursor(0, 0); // Move cursor to the first row
-  lcd.print("Linear Scale"); // You can customize this name
+  lcd.setCursor(0, 0);             // Position cursor to the first row
+  lcd.print("Group Name");         // Replace with actual group name
 }
 
-// Function to read data from HX711
-long readHX711() {
-  long count = 0;
+// Measure force, then display on LCD and print to Serial Monitor
+void measureAndDisplayForce() {
+  force = getForce();              // Get the force measurement
+  displayForce(force);             // Show the force on the LCD
+  printToSerial(force);            // Print the force to Serial Monitor
+}
 
-  // Wait for the DT_PIN to go LOW (data ready)
+// Read raw data from HX711 load cell amplifier
+long readHX711() {
+  long count = 0;                  // Initialize count for data storage
+
+  // Wait for data to be ready (DT_PIN goes LOW)
   while (digitalRead(DT_PIN));
 
-  // Pulse the SCK pin 24 times to read data
+  // Read 24 bits of data from HX711 by pulsing SCK_PIN
   for (int i = 0; i < 24; i++) {
-    digitalWrite(SCK_PIN, HIGH);
-    count = count << 1;
-    digitalWrite(SCK_PIN, LOW);
-    if (digitalRead(DT_PIN)) {
+    digitalWrite(SCK_PIN, HIGH);   // Set clock HIGH
+    count = count << 1;            // Shift count to the left by 1 bit
+    digitalWrite(SCK_PIN, LOW);    // Set clock LOW
+    if (digitalRead(DT_PIN)) {     // If data pin is HIGH, increment count
       count++;
     }
   }
 
-  // Pulse once more for the gain of 128
-  digitalWrite(SCK_PIN, HIGH);
-  digitalWrite(SCK_PIN, LOW);
+  // Additional pulse for 128 gain setting
+  digitalWrite(SCK_PIN, HIGH);     // Set clock HIGH
+  digitalWrite(SCK_PIN, LOW);      // Set clock LOW
 
-  // Adjust for negative numbers (two's complement)
+  // Apply two's complement to handle negative values
   count ^= 0x800000;
 
-  return count;
+  return count;                    // Return the raw HX711 reading
 }
 
-// Function to tare (zero out) the scale
-void tareScale() {
-  tareValue = readHX711();
-  Serial.print("Tare value set: ");
-  Serial.println(tareValue);
-}
-
-// Function to get the force reading from the scale
+// Convert raw data to force using the calibration factor
 float getForce() {
-  long rawValue = readHX711();
-  
-  // Subtract the tare value to zero the scale
-  long adjustedValue = rawValue - tareValue;
-  
-  // Linear relation: divide the adjusted raw value by the calibration factor
-  return (float)adjustedValue / calibration_factor;
+  long rawValue = readHX711();         // Get raw data from HX711
+  return (rawValue / calibration_factor); // Divide by calibration factor for scaling
 }
 
-// Function to measure and display force
-void measureAndDisplayForce() {
-  force = getForce();       // Calculate the force
-  displayForce(force);      // Show the result on the LCD
-  printToSerial(force);     // Print the result to the Serial Monitor
-}
-
-// Function to display force on the LCD
+// Display force on the second row of LCD
 void displayForce(float force) {
-  lcd.setCursor(0, 1);   // Set the cursor to the second row
-  lcd.print("Mass = ");
-  lcd.print(force, 2);   // Display the force with two decimal places
-  lcd.print(" kg");      // Assuming the force is in kg
+  lcd.setCursor(0, 1);                 // Move cursor to second row
+  lcd.print("Mass = ");                // Display label for mass
+  lcd.print(int(force));               // Display force value as integer
+  lcd.print("g");                      // Display unit (grams)
 }
 
-// Function to print force to the Serial Monitor
+// Print force value to Serial Monitor for debugging or logging
 void printToSerial(float force) {
-  Serial.print("Force: ");
-  Serial.print(force, 2);   // Print the force with two decimal places
-  Serial.println(" kg");
+  Serial.println(force);               // Print the force value to Serial
 }
+
